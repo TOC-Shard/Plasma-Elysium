@@ -519,10 +519,10 @@ static void AuthFailedStrings (ENetError authError,
                     *ppStr2 = "Account Not Activated.";
                     break;
                 case kNetErrConnectFailed:
-                    *ppStr2 = "Unable to connect to Myst Online.";
+                    *ppStr2 = "Unable to connect to The Open Cave - Elysium.";
                     break;
                 case kNetErrDisconnected:
-                    *ppStr2 = "Disconnected from Myst Online.";
+                    *ppStr2 = "Disconnected from The Open Cave - Elysium.";
                     break;
                 case kNetErrAuthenticationFailed:
                     *ppStr2 = "Incorrect password.\n\nMake sure CAPS LOCK is not on.";
@@ -532,7 +532,7 @@ static void AuthFailedStrings (ENetError authError,
                     *ppStr2 = "Unable to connect to GameTap, please try again in a few minutes.";
                     break;
                 case kNetErrAccountBanned:
-                    *ppStr2 = "Your account has been banned from accessing Myst Online.  If you are unsure as to why this happened please contact customer support.";
+                    *ppStr2 = "Your account has been banned or has not yet been activated to access The Open Cave - Elysium.\nIf you are unsure why this happened, please contact support.";
                     break;
                 default:
                     *ppWStr =  NetErrorToString (authError);
@@ -805,6 +805,7 @@ INT_PTR CALLBACK UruLoginDialogProc( HWND hwndDlg, UINT uMsg, WPARAM wParam, LPA
             SendMessage(GetDlgItem(hwndDlg, IDC_LANGUAGE), CB_SETCURSEL, (WPARAM)plLocalization::GetLanguage(), 0);
 
             EnableWindow(GetDlgItem(hwndDlg, IDC_URULOGIN_NEWACCTLINK), !GetServerSignupUrl().empty());
+            EnableWindow(GetDlgItem(hwndDlg, IDC_URULOGIN_DONATE), !GetServerDonateUrl().empty());
 
             SetTimer(hwndDlg, AUTH_LOGIN_TIMER, 10, nullptr);
             return FALSE;
@@ -898,6 +899,13 @@ INT_PTR CALLBACK UruLoginDialogProc( HWND hwndDlg, UINT uMsg, WPARAM wParam, LPA
             {
                 ST::string signupurl = GetServerSignupUrl();
                 ShellExecuteW(nullptr, L"open", signupurl.to_wchar().data(), nullptr, nullptr, SW_SHOWNORMAL);
+
+                return TRUE;
+            }
+            else if (HIWORD(wParam) == BN_CLICKED && LOWORD(wParam) == IDC_URULOGIN_DONATE)
+            {
+                ST::string donateurl = GetServerDonateUrl();
+                ShellExecuteW(nullptr, L"open", donateurl.to_wchar().data(), nullptr, nullptr, SW_SHOWNORMAL);
 
                 return TRUE;
             }
