@@ -48,11 +48,11 @@ Add your cheat function below:
 
 def ListYeeshaPages(args):
     import Plasma
-    import xLinkingBookDefs
+    import xYeeshaPageDefs
     vault = Plasma.ptVault()
     psnlSDL = vault.getPsnlAgeSDL()
     if psnlSDL:
-        for sdlvar,page in xLinkingBookDefs.xYeeshaPages:
+        for sdlvar, page in xYeeshaPageDefs.YeeshaPageBookDefs:
             FoundValue = psnlSDL.findVar(sdlvar)
             print("%s is %d" % (sdlvar, FoundValue.getInt()))
     else:
@@ -61,7 +61,7 @@ def ListYeeshaPages(args):
 
 def GetAllYeeshaPages(args):
     import Plasma
-    import xLinkingBookDefs
+    import xYeeshaPageDefs
     vault = Plasma.ptVault()
     psnlSDL = vault.getPsnlAgeSDL()
     if psnlSDL:
@@ -71,7 +71,7 @@ def GetAllYeeshaPages(args):
         else:
             newval = 1
             print("xCheat.GetYeeshaPage(): adding all Yeesha pages...")
-        for sdlvar,page in xLinkingBookDefs.xYeeshaPages:
+        for sdlvar,page in xYeeshaPageDefs.YeeshaPageBookDefs:
             FoundValue = psnlSDL.findVar(sdlvar)
             FoundValue.setInt(newval)
         vault.updatePsnlAgeSDL(psnlSDL)
@@ -79,26 +79,62 @@ def GetAllYeeshaPages(args):
         print("Could not find personal age SDL")
 
 
-def GetYeeshaPage(args):
+def GetAllBahroWedges(args):
     import Plasma
-    import xLinkingBookDefs
     vault = Plasma.ptVault()
     psnlSDL = vault.getPsnlAgeSDL()
+    if psnlSDL:
+        if args == "0":
+            newval = 0
+            print("xCheat.GetAllBahroWedges(): removing all Bahro wedges...")
+        else:
+            newval = 1
+            print("xCheat.GetAllBahroWedges(): adding all Bahro wedges...")
+        for i in range(1, 14):
+            FoundValue = psnlSDL.findVar(f"psnlBahroWedge{i:02}")
+            FoundValue.setInt(newval)
+        vault.updatePsnlAgeSDL(psnlSDL)
+    else:
+        print("Could not find personal age SDL")
+
+
+def GetAllCalendarStones(args):
+    import Plasma
+    vault = Plasma.ptVault()
+    psnlSDL = vault.getPsnlAgeSDL()
+    if psnlSDL:
+        if args == "0":
+            newval = 0
+            print("xCheat.GetAllCalendarStones(): removing all calendar stones...")
+        else:
+            newval = 1
+            print("xCheat.GetAllCalendarStones(): adding all calendar stones...")
+        for i in range(1, 13):
+            FoundValue = psnlSDL.findVar(f"psnlCalendarStone{i:02}")
+            FoundValue.setInt(newval)
+        vault.updatePsnlAgeSDL(psnlSDL)
+    else:
+        print("Could not find personal age SDL")
+
+
+def GetYeeshaPage(args):
     if not args:
         print("xCheat.GetYeeshaPage(): ERROR.  Must provide a Yeesha Page number.")
         return
-    thispage = "YeeshaPage" + args
-    if psnlSDL:
-        for sdlvar,page in xLinkingBookDefs.xYeeshaPages:
-            if sdlvar == thispage:
-                FoundValue = psnlSDL.findVar(sdlvar)
-                FoundValue.setInt(1)
-                vault.updatePsnlAgeSDL(psnlSDL)
-                print("xCheat.GetYeeshaPage(): Done. Have added: ",sdlvar)
-                return
-        print("xCheat.GetYeeshaPage(): ERROR.  Could not find Yeesha page: ",thispage)
-    else:
+
+    import Plasma
+    vault = Plasma.ptVault()
+    psnlSDL = vault.getPsnlAgeSDL()
+    if not psnlSDL:
         print("xCheat.GetYeeshaPage(): ERROR.  Could not find personal age SDL")
+        return
+    sdlvar = f"YeeshaPage{args}"
+    if FoundValue := psnlSDL.findVar(sdlvar):
+        FoundValue.setInt(1)
+        vault.updatePsnlAgeSDL(psnlSDL)
+        print("xCheat.GetYeeshaPage(): Done. Have added: ", sdlvar)
+    else:
+        print("xCheat.GetYeeshaPage(): ERROR.  Could not find Yeesha page: ", sdlvar)
 
 
 def GetAgeJourneyCloths(args):

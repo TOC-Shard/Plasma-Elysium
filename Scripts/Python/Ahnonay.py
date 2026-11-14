@@ -81,13 +81,7 @@ class Ahnonay(ptResponder):
         owner = None
         myID = str(PtGetClientIDFromAvatarKey(PtGetLocalAvatar().getKey()))
 
-        ageStruct = ptAgeInfoStruct()
-        ageStruct.setAgeFilename("AhnonayCathedral")
-        ageLinkNode = agevault.getSubAgeLink(ageStruct)
-        if ageLinkNode:
-            localCathedralGuid = ageLinkNode.getAgeInfo().getAgeInstanceGuid()
-        else:
-            localCathedralGuid = None
+        localCathedralGuid = agevault.getAgeInfo().getParentAgeInstanceGuid()
 
         folder = vault.getAgesIOwnFolder()
         cathedralInfoTemplate = ptVaultAgeInfoNode(0)
@@ -161,7 +155,7 @@ class Ahnonay(ptResponder):
                 ageDataFolder.addNode(newNode)
 
             if volatile and linkid:
-                if volatile.getValue() == "1" and guid != linkid.getValue():
+                if volatile.getValue() == "1":
                     PtDebugPrint("Ahnonay.OnServerInitComplete(): In a new instance of Ahnonay so setting new vars")
                     linkid.setValue(guid)
                     locked.setValue("1")
@@ -199,6 +193,8 @@ class Ahnonay(ptResponder):
             PtPageInNode("Sphere01BuildingInterior")
             PtPageInNode("MaintRoom01")
             PtPageInNode("ahnySphere01")
+            if PtIsSinglePlayerMode():
+                PtPageInNode("Sphere01SinglePlayer")
         elif newSphere == 2:
             PtPageInNode("MaintRoom02")
             PtPageInNode("ahnySphere02")
@@ -211,6 +207,7 @@ class Ahnonay(ptResponder):
             PtPageInNode("MaintRoom04")
             PtPageInNode("EngineerHut")
             PtPageInNode("ahnySphere04")
+        self.SetFogToSphere(newSphere)
 
     ###########################
     def OnPageLoad(self,what,who):
@@ -255,3 +252,16 @@ class Ahnonay(ptResponder):
         if target == "sphere":
             if self.sceneobject.isLocallyOwned():
                 ageSDL["ahnyCurrentSphere"] = (int(param),)
+
+    def SetFogToSphere(self, sphere: int):
+        # Set Fog for Sphere 1, 2, and 4 from TPotS values.
+        # Sphere 3 is using the default from Ahnonay.fni
+        if sphere == 1:
+            PtFogSetDefLinear(0, 1200, 2)
+            PtFogSetDefColor(ptColor(0.7, 0.7, 0.7))
+        elif sphere == 2:
+            PtFogSetDefLinear(0, 1800, 2)
+            PtFogSetDefColor(ptColor(0.1, 0.1, 0.1))
+        elif sphere == 4:
+            PtFogSetDefLinear(0, 10000, 1.5)
+            PtFogSetDefColor(ptColor(1.0, 1.0, 1.0))

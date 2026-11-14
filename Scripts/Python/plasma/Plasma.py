@@ -4055,6 +4055,12 @@ class ptPhysics:
         """
         ...
 
+    def resetSyncState(self):
+        """Resets the physical to its default recipe pose (position, rotation, and velocities).
+        Same effect as the console command Physics.ResetKickables, but scoped to just this object.
+        """
+        ...
+
     def rotate(self, radians, axis):
         """Rotates the attached sceneobject the specified radians around the specified axis"""
         ...
@@ -5091,6 +5097,10 @@ class ptVaultAgeInfoNode(ptVaultNode):
         """Returns the displayable version of the age name"""
         ...
 
+    def getParentAgeInstanceGuid(self) -> str:
+        """Returns the parent age instance guid"""
+        ...
+
     def getParentAgeLink(self):
         """Returns ptVaultAgeLinkNode of the age's parent age, or None if not a child age"""
         ...
@@ -5129,6 +5139,10 @@ class ptVaultAgeInfoNode(ptVaultNode):
 
     def setAgeUserDefinedName(self, udname):
         """Sets the user defined part of the name"""
+        ...
+
+    def setParentAgeInstanceGuid(self, guid: str):
+        """Sets the parent age instance GUID"""
         ...
 
 class ptVaultAgeLinkNode(ptVaultNode):
