@@ -10,7 +10,7 @@ on:
 
 jobs:
   mirror-github:
-    runs-on: debian-11
+    runs-on: debian-12
 
     steps:
       - name: Checkout

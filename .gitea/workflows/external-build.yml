@@ -5,7 +5,7 @@ on:
 
 jobs:
   linux:
-    runs-on: debian-11
+    runs-on: debian-12
     steps:
       # First message to Discord: the run has started. It is a step of this
       # job (not a job of its own) so it cannot hold anything back, and a
@@ -263,7 +263,7 @@ jobs:
 
   publish:
     needs: [linux, macos, windows]
-    runs-on: debian-11
+    runs-on: debian-12
     if: github.ref == 'refs/heads/master'
 
     permissions:
@@ -322,7 +322,7 @@ jobs:
   notify:
     needs: [linux, macos, windows, publish]
     if: always()
-    runs-on: debian-11
+    runs-on: debian-12
     steps:
       - name: Notify Discord (result)
         continue-on-error: true
