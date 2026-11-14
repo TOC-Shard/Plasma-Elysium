@@ -1,0 +1,359 @@
+name: External Build
+
+on:
+  push:
+
+jobs:
+  linux:
+    runs-on: debian-11
+    steps:
+      # First message to Discord: the run has started. It is a step of this
+      # job (not a job of its own) so it cannot hold anything back, and a
+      # failing notification never fails the build. The webhook URL is the
+      # Gitea secret DISCORD_WEBHOOK_URL (repository settings > Actions >
+      # Secrets); without it the step does nothing. The second message, with
+      # the result of every job, comes from the "notify" job at the end.
+      - name: Notify Discord (started)
+        continue-on-error: true
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          RUN_NR: ${{ github.run_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_number }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          [ -n "$WEBHOOK" ] || { echo "DISCORD_WEBHOOK_URL is not set, skipping"; exit 0; }
+          esc() { printf '%s' "$1" | head -n1 | tr -d '\000-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+          body=$(printf '{"username":"Gitea CI","embeds":[{"title":"Build #%s gestartet","description":"**%s** `%s` von %s\\n%s","url":"%s","color":3447003}]}' \
+            "$RUN_NR" "$(esc "$REPO")" "$(esc "$BRANCH")" "$(esc "$ACTOR")" "$(esc "${SHA:0:10} $COMMIT_MSG")" "$RUN_URL")
+          curl --silent --show-error --max-time 20 -H "Content-Type: application/json" -d "$body" "$WEBHOOK" || true
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Product identity
+        env:
+          PRODUCT_IDENTITY: ${{ secrets.PRODUCT_IDENTITY }}
+        run: |
+          [ -n "$PRODUCT_IDENTITY" ] || { echo "Secret PRODUCT_IDENTITY is not set" >&2; exit 1; }
+          printf '%s\n' "$PRODUCT_IDENTITY" > ProductIdentity.local.cmake
+
+      - name: Configure
+        run: |
+          cmake \
+            -G Ninja \
+            -DUSE_VCPKG=ON \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DPLASMA_EXTERNAL_RELEASE=ON \
+            -DPLASMA_BUILD_TOOLS=OFF \
+            -DVCPKG_INSTALL_OPTIONS=--clean-after-build \
+            -S . -B build
+
+      - name: Build
+        run: cmake --build build -j $(nproc)
+
+      - name: Install
+        run: cmake --build build --target install -j $(nproc)
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: plasma-linux-x64-external
+          path: build/install
+
+  macos:
+    runs-on: macos-monterey
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      # This job follows the GitHub CI's macOS job: vcpkg, deployment target
+      # 10.14, x86_64.
+      #
+      # PREVIOUS SETUP (Plasma project, kept here in case this goes back down
+      # to 10.13): no vcpkg, CMAKE_OSX_DEPLOYMENT_TARGET 10.13, the 13 heavy
+      # libs + PhysX + Python built manually outside Homebrew with
+      # -mmacosx-version-min=10.13 (the working setup on the physical test
+      # Mac). Configure then passed
+      #   -DPython3_EXECUTABLE=/usr/local/Frameworks/Python.framework/Versions/3.12/bin/python3.12
+      #     (pinned: the Python version Homebrew links as "Current" can drift
+      #     newer than the one the packed Python bytecode was built against
+      #     and crash the client after login with SIGSEGV in
+      #     ptModulePackLoader)
+      #   -DLibArchive_INCLUDE_DIR=/usr/local/include
+      #   -DLibArchive_LIBRARY=<Xcode MacOSX.sdk>/usr/lib/libarchive.tbd
+      #     (Apple's system libarchive instead of a keg-only Homebrew copy,
+      #     which dragged five extra dylibs into the app bundle; the header
+      #     is not part of the SDK and was copied to /usr/local/include once
+      #     on the runner)
+      # and no -DUSE_VCPKG. To go back, drop USE_VCPKG/CMAKE_FIND_FRAMEWORK/
+      # VCPKG_INSTALL_OPTIONS and the "Install dependencies" step, set the
+      # target to 10.13 and re-add the three flags above.
+      #
+      # CMAKE_Metal_COMPILER is given explicitly: the runner daemon's PATH does
+      # not contain the Xcode toolchain, and CMake's own search then reports
+      # "Looking for a Metal compiler - NOTFOUND". PLASMA_PIPELINE_METAL
+      # switched itself off without any error, and the app was built without
+      # a renderer and without the pfMetalPipelineShaders*.metallib files
+      # (builds #70 and later).
+      - name: Product identity
+        env:
+          PRODUCT_IDENTITY: ${{ secrets.PRODUCT_IDENTITY }}
+        run: |
+          [ -n "$PRODUCT_IDENTITY" ] || { echo "Secret PRODUCT_IDENTITY is not set" >&2; exit 1; }
+          printf '%s\n' "$PRODUCT_IDENTITY" > ProductIdentity.local.cmake
+
+      # CMake runs "metal --version" with a 10 s timeout and then reports
+      # "The Metal compiler ... cannot be run:" with an empty message. On the
+      # VM the very first start after a reboot is slow (cold disk cache), so
+      # warm the compiler up here, without a timeout, before configuring.
+      # Build tools vcpkg needs on macOS (same list as the GitHub CI). brew
+      # skips what is already installed.
+      - name: Install dependencies
+        run: |
+          brew install -q \
+              autoconf \
+              autoconf-archive \
+              automake \
+              libtool \
+              nasm \
+              python-setuptools
+
+      - name: Warm up Metal compiler
+        run: |
+          METAL=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/metal
+          for i in 1 2 3; do
+            if "$METAL" --version; then exit 0; fi
+            sleep 10
+          done
+          echo "The Metal compiler does not run" >&2
+          exit 1
+
+      - name: Configure
+        run: |
+          cmake \
+            -G Ninja \
+            -DUSE_VCPKG=ON \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.14 \
+            -DCMAKE_FIND_FRAMEWORK=LAST \
+            -DPLASMA_EXTERNAL_RELEASE=ON \
+            -DPLASMA_BUILD_TOOLS=OFF \
+            -DVCPKG_INSTALL_OPTIONS=--clean-after-build \
+            -DCMAKE_Metal_COMPILER=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/metal \
+            -S . -B build
+
+      - name: Build
+        run: cmake --build build --target plClient -j 4
+
+      - name: Install
+        run: cmake --build build --target install -j 4
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: plasma-macos-x64-external
+          path: build/install
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      # Ninja Multi-Config instead of the "Visual Studio 17 2022" generator:
+      # same per-config (RelWithPDB) semantics (CMAKE_CONFIGURATION_TYPES,
+      # --config at build time -- see the custom RelWithPDB setup in the
+      # top-level CMakeLists.txt), but Ninja's own build output reports
+      # "[n/total] Building CXX object ..." per file like the Linux/macOS
+      # jobs already do, instead of MSBuild's per-file/per-warning log lines
+      # with no overall progress count.
+      #
+      # Unlike the VS generator, Ninja doesn't locate MSVC itself -- it just
+      # calls whatever cl.exe is on PATH, and this runner has none there by
+      # default. So the VS 2022 build environment is imported here
+      # first via vswhere + vcvars64.bat, and handed to the following steps
+      # through GITHUB_ENV/GITHUB_PATH. Restricted to VS 2022 ([17,18)) --
+      # the v143 toolset's runtime still starts on Windows 7, while VS 2026's
+      # STL imports CreateFile2 (Windows 8+) -- and because this runner has
+      # several Visual Studio versions installed;
+      # the vcpkg triplets (Scripts/Triplets/*-windows-plasma.cmake) follow
+      # whichever instance VSINSTALLDIR (set by vcvars64.bat) names, so
+      # vcpkg's per-port builds end up on the same toolset as the main
+      # project without touching them.
+      #
+      # This also is where the Windows SDK gets pinned now. The runner has
+      # two installed (10.0.19041.0 and 10.0.26100.0); without a pin, the
+      # main project configure and vcpkg's own per-port builds can each
+      # resolve "latest SDK" independently and disagree, statically linking
+      # a vcpkg port (e.g. openal-soft) built against one SDK's STL into a
+      # client built against the other's - surfaces as an unresolved
+      # __std_rotate (an MSVC STL vectorized-algorithm symbol only exported
+      # starting with a specific SDK/STL version) at the final link step,
+      # not at compile time, and isn't fixed by clearing vcpkg's binary
+      # cache. -DCMAKE_SYSTEM_VERSION only ever steered the VS generator
+      # (and PowerShell was splitting that unquoted argument at its first
+      # dot anyway), so vcvars64.bat's own SDK argument replaces it.
+      - name: Setup MSVC environment
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
+          if (-not $vs) { throw "Visual Studio 2022 with the C++ toolset was not found" }
+          $before = @{}
+          Get-ChildItem env: | ForEach-Object { $before[$_.Name] = $_.Value }
+          $dump = cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" 10.0.26100.0 >nul && set"
+          foreach ($line in $dump) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              $name = $Matches[1]
+              $value = $Matches[2]
+              if ($name -ieq 'PATH') {
+                $old = $before['Path'] -split ';'
+                $value -split ';' | Where-Object { $_ -and ($old -notcontains $_) } | Add-Content -Path $env:GITHUB_PATH
+              } elseif ($before[$name] -ne $value) {
+                "$name=$value" | Add-Content -Path $env:GITHUB_ENV
+              }
+            }
+          }
+        shell: powershell
+
+      - name: Product identity
+        env:
+          PRODUCT_IDENTITY: ${{ secrets.PRODUCT_IDENTITY }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:PRODUCT_IDENTITY)) { Write-Error "Secret PRODUCT_IDENTITY is not set"; exit 1 }
+          Set-Content -Path ProductIdentity.local.cmake -Value $env:PRODUCT_IDENTITY -Encoding ascii
+        shell: powershell
+
+      - name: Configure
+        run: |
+          cmake `
+            -G "Ninja Multi-Config" `
+            -DUSE_VCPKG=ON `
+            -DPLASMA_EXTERNAL_RELEASE=ON `
+            -DPLASMA_BUILD_TOOLS=OFF `
+            -DVCPKG_INSTALL_OPTIONS=--clean-after-build `
+            -S . -B build
+        shell: powershell
+
+      - name: Build
+        run: cmake --build build --config RelWithPDB -j 4
+        shell: powershell
+
+      - name: Install
+        run: cmake --build build --target install --config RelWithPDB -j 4
+        shell: powershell
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: plasma-windows-x64-external
+          path: build/install
+
+  publish:
+    needs: [linux, macos, windows]
+    runs-on: debian-11
+    if: github.ref == 'refs/heads/master'
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+
+      - name: Zip Artifacts
+        run: |
+          mkdir -p release
+          cd artifacts
+          for d in */; do
+            name="${d%/}"
+            (cd "$name" && zip -r "../../release/${name}.zip" .)
+          done
+
+      # Not svenstaro/upload-release-action: it sends the asset name as a query
+      # parameter that is built from the release's upload_url template, which
+      # Gitea does not return. The upload then arrives without a name and Gitea
+      # answers "Could not determine name of attachment". So the release is
+      # replaced through the Gitea API directly (old release and tag removed,
+      # new ones created on this commit, then the files attached).
+      - name: Update Release
+        env:
+          TOKEN: ${{ github.token }}
+          API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}
+          SHA: ${{ github.sha }}
+          TAG: last-successful-external
+        run: |
+          set -e
+          auth="Authorization: token $TOKEN"
+          curl -sS -o /dev/null -X DELETE -H "$auth" "$API/releases/tags/$TAG" || true
+          curl -sS -o /dev/null -X DELETE -H "$auth" "$API/tags/$TAG" || true
+          resp=$(curl -sSf -X POST -H "$auth" -H "Content-Type: application/json" \
+            -d "{\"tag_name\":\"$TAG\",\"target_commitish\":\"$SHA\",\"name\":\"Last successful External build\",\"prerelease\":true}" \
+            "$API/releases")
+          id=$(printf '%s' "$resp" | grep -o '^{"id":[0-9]*' | grep -o '[0-9]*')
+          [ -n "$id" ] || { echo "Could not read the release id" >&2; exit 1; }
+          for f in release/*; do
+            echo "Uploading $f"
+            curl -sSf -X POST -H "$auth" -F "attachment=@$f" \
+              "$API/releases/$id/assets?name=$(basename "$f")" -o /dev/null
+          done
+
+  # Second message to Discord, once every other job is through: green when all
+  # of them succeeded (a skipped job, e.g. publish outside master, does not
+  # count against it), red as soon as one failed or was cancelled. if: always()
+  # makes it run after failures too. A failing notification never fails the run.
+  notify:
+    needs: [linux, macos, windows, publish]
+    if: always()
+    runs-on: debian-11
+    steps:
+      - name: Notify Discord (result)
+        continue-on-error: true
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          RUN_NR: ${{ github.run_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_number }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          R_LINUX: ${{ needs.linux.result }}
+          R_MACOS: ${{ needs.macos.result }}
+          R_WINDOWS: ${{ needs.windows.result }}
+          R_PUBLISH: ${{ needs.publish.result }}
+        run: |
+          [ -n "$WEBHOOK" ] || { echo "DISCORD_WEBHOOK_URL is not set, skipping"; exit 0; }
+          esc() { printf '%s' "$1" | head -n1 | tr -d '\000-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+          ok=1; lines=""
+          for pair in "linux:$R_LINUX" "macos:$R_MACOS" "windows:$R_WINDOWS" "publish:$R_PUBLISH"; do
+            name="${pair%%:*}"; res="${pair#*:}"
+            case "$res" in
+              success) icon="✅" ;;
+              skipped) icon="⏭️" ;;
+              *) icon="❌"; ok=0 ;;
+            esac
+            lines="${lines}${icon} ${name}: ${res}\\n"
+          done
+          if [ "$ok" = 1 ]; then title="Build #$RUN_NR erfolgreich"; color=3066993
+          else title="Build #$RUN_NR fehlgeschlagen"; color=15158332; fi
+          body=$(printf '{"username":"Gitea CI","embeds":[{"title":"%s","description":"**%s** `%s` von %s\\n%s\\n\\n%s","url":"%s","color":%s}]}' \
+            "$title" "$(esc "$REPO")" "$(esc "$BRANCH")" "$(esc "$ACTOR")" "$(esc "${SHA:0:10} $COMMIT_MSG")" "$lines" "$RUN_URL" "$color")
+          curl --silent --show-error --max-time 20 -H "Content-Type: application/json" -d "$body" "$WEBHOOK" || true
